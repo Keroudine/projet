@@ -1,0 +1,385 @@
+# Projet détection de langues.
+# Les participants:
+    Keroudine BELLADJO & Ameline FAVRAIS
+En premier lieu, afin que les fonctions puissent fonctionner, il faut importer différentes bibliothèques de pyhton, à savoir:
+- Matplotlib qui va nous permettre de visualiser les données (tracer des graphiques)
+- Scikit-learn qui propose une implémentation de l’algorithme des k plus proches voisins.
+- Pandas qui va nous permettre de traiter nos données
+- numpy permet d'effectuer des calculs numériques et introduit une gestion facilitée des tableaux de nombres
+- requests Gestion domaines et URLS internationales
+- re  permet d'utiliser des expressions régulières avec Python
+- BeautifulSoup (belle soup)- BeautifulSoup (belle soup) est une bibliothèque Python d'analyse syntaxique de documents HTML et XML
+import matplotlib.pyplot as plt
+import seaborn as sns
+import pandas as pd
+import numpy as np
+import math
+import requests
+import re
+from bs4 import BeautifulSoup
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import zero_one_loss
+from sklearn.neighbors import KNeighborsClassifier
+# PARTIE 1
+## 1) Création d'un ensemble de données en 5 langues.
+On importe des morceaux de texte suffisemment grand pour etre étudié, et de différentes langues afin de pouvoir comparer les caractères par la suite.
+- Voici les url du meme texte en 5 langues et leur classe :
+
+url=("https://fr.wikipedia.org/wiki/Martin_Luther_King",
+"https://en.wikipedia.org/wiki/Martin_Luther_King_Jr.",
+"https://de.wikipedia.org/wiki/Martin_Luther_King",
+"https://it.wikipedia.org/wiki/Martin_Luther_King",
+"https://es.wikipedia.org/wiki/Martin_Luther_King")
+classe=("FR","EN","DE","IT","ES")
+- Nous allons définir une fonction "Extraction_de_texte(url)" qui prend en argument un url et mets la contenance de cet url dans un fichier texte et le retourne. Cette fonction nous permetra par la suite de pouvoir traiter la donnée que contient l'url.
+def extraction_texte(url):
+    """
+     Fonction qui prend en argument un url,le traite
+     et retourne son contenue
+    """
+    page=requests.get(url)
+    p=BeautifulSoup(page.content,"html.parser")
+    resultat=p.find(id="mw-content-text")
+    para=resultat.find_all("p")
+    l=[]
+    for t in para:
+        l.append(t.text)
+    return " ".join(l)
+- On a creer la fonction "texte_sans_c_speciaux" pour filtrer tous les caractères spéciaux et accentués qui sont integrés dans les textes, comme par exemple les parenthèses, en effet cela n'est pas utile de faire une comparaison sur ce genre de caractères et cela la rendra plus précise. On limitera également les textes à 40 000 caractères afin que tout les textes aient le meme nombre de fragments n.
+def texte_sans_c_speciaux(t,ind_d_ajstmnt_text=40000):
+     
+    """Fonction qui prend en argument un fichier texte creer par la fonction precedente et un
+    Indice d'ajustement de la longueur du texte et 
+    retourne toutes les sous-chaînes qui correspondent à des lettres muniscules ou majuscules du fichier texte"""
+    
+    texte=t.lower()
+    texte=re.findall("[a-z]",texte)
+    texte="".join(texte)
+    if len(texte)> ind_d_ajstmnt_text:
+        texte= texte[0:ind_d_ajstmnt_text]
+    else:
+        print("Indice d'ajustement de la longueur du texte est trop grand " + str(len(texte)))
+
+    return texte
+- Créaction final des textes avec les 2 fonctions précedentes pour les 5 langues.
+texte_fr=texte_sans_c_speciaux(extraction_texte(url[0]))
+texte_en=texte_sans_c_speciaux(extraction_texte(url[1]))
+texte_de=texte_sans_c_speciaux(extraction_texte(url[2]))
+texte_it=texte_sans_c_speciaux(extraction_texte(url[3]))
+texte_es=texte_sans_c_speciaux(extraction_texte(url[4]))
+## 2) Exploration des données.
+- Hypothèse: La distribution des caractères varie d'une langue à l'autre.
+- Nous allons dans un premier temps étudier la longueur de chaque texte afin de vérifier qu'elle soit bien limité à 40 000 caractères.
+len(texte_fr),len(texte_en),len(texte_de),len(texte_es),len(texte_it)
+- On peut donc creer un tableur, plus précisement un DataFrame de chacune des 5 langues, qui donnera le nombre d'occurences de chacun des caractères.
+V=pd.Series(list(texte_it)).value_counts()
+W=pd.Series(list(texte_es)).value_counts()
+X=pd.Series(list(texte_fr)).value_counts()
+Y=pd.Series(list(texte_en)).value_counts()
+Z=pd.Series(list(texte_de)).value_counts()
+df= pd.DataFrame(
+{"Italien": V,
+ "Espagnol": W,
+ "Français": X,
+"Anglais": Y,
+"Allemand": Z})
+- On remplacera également les "NaN" par des 0.
+df = df.replace(np.NaN, 0, regex=True)
+df
+- On peut ensuite ranger les caractères par nombre d'occurences, par langue, de facon croissante, afin de pouvoir observer lesquelles sont plus fréquentes et lesquelles ne le sont pas. 
+df["Français"].sort_values()
+df["Anglais"].sort_values()
+df["Allemand"].sort_values()
+df["Espagnol"].sort_values()
+df["Italien"].sort_values()
+# Partie 2 :
+## Représentation des données.
+- Contruction d'un diagrame en baton pour avoir la dispersion des caractères pour chaque langue afin de determiner ceux qui sont les plus fréquents et les plus dicriminants d'une langue à l'autre.
+- Il nous permettra par la suite de determiner les caractères que nous allons utilisés pour notre ensemble d'entrainement que nous allons nommé "d" par la suite
+df.plot(kind='bar',figsize=[15,8])
+- L'hypothèse est vérifiée, on peut observer à travers ce graphique que la distribution des caractères varie d'une langue à l'autre.
+- On pourra donc s'en servir pour faire de la détection de langues.
+- On va donc faire de l'exploration de données pour tester cette hypothèse:
+    - quels sont les différents caractères utilisés dans les différentes langues?
+    - quelle est la fréquence d'apparition de chacun des caractères?
+
+- On choisi donc un d en fonction des caractères les plus fréquents et discriminants. Ici on prendra les 4 caractères les plus présents dans chacune des langues. Ce qui répondra à notre première question.
+d=['a', 'e', 'n', 'u', 'p', 'i', 's', 'w','o', 'l', 'h','y','b','r','j','t'] 
+## Constitution d'un ensemble d'entraînement.
+## 1) Fragmentation des textes.
+- Afin d'avoir un résultat cohérent, on a prit comme l_min la racine carré de la longueurs des textes, ce qui donne donc l_min = 200. Cette manière de faire permet d'avoir une même taille de fragment pour tou le texte, ainsi cela permetra d'avoir une meilleurs precision pour la prediction de la langue.
+l_min=math.ceil(np.sqrt(40000))
+l_min
+- La fonction que nous allons definir maintenant appelée "les_fragment_du_texte(url,l_min)"  va nous permetre de découper les textes récoltés dans l'étape précédente en fragments de textes qui seront les entrées d'un classifieur (ici l'algo de Knn)
+    - On dipose du meme texte en 5 langues: Français,Anglais,Allemand,Italien,Espagnol. 
+    - Pour chaque texte, on le découpe par defaut en l_min=200 par morceaux pour avoir un total de n=N//l_min=200 fragments avec N la longueur du texte. 
+    - Pour chaque entrée, on calcule la frequence de chaque caractère.
+    - N est suffisamment grand (N=40000) pour chaque texte pour ne pas avoir des fragments beaucoup trop petits
+    - On a chosi par defaut l_min ou la longueur de fragemnt egale 200 parce qu'il semble plus interesant (peut minimiser le plus possible le risque empirique et en generalisation), c'est en effet notre l_min choisi, nous veront par la suite si notre intuition est juste.
+def les_fragment_du_texte(url,l_min=200):
+    """Prend en argument un url et l_min la longeur des fragment et
+    retourne le texte fragmenté  sous forme d'une liste de n fragment de longueur l_min 
+    """
+    texte=texte_sans_c_speciaux(extraction_texte(url))
+    N=len(texte)
+    n=N//l_min
+    l=[]
+    while n>0:
+        n=n-1
+        l.append(texte[:l_min])
+        texte=texte[l_min:]
+    return l
+- Obtention des textes fragmenter des 5 langues.
+frag_fr=les_fragment_du_texte(url[0],l_min)
+frag_en=les_fragment_du_texte(url[1],l_min)
+frag_de=les_fragment_du_texte(url[2],l_min)
+frag_es=les_fragment_du_texte(url[3],l_min)
+frag_it=les_fragment_du_texte(url[4],l_min)
+len(frag_fr),len(frag_en),len(frag_de),len(frag_es),len(frag_it)
+- Résultat cohérent; en effet les textes sont tous limités à 40000 caractères et les fragment à 40000/200 = 200
+n=len(frag_fr)
+n
+- Conlusion:
+    - d = ['a', 'e', 'n', 'u', 'p', 'i', 's', 'w','o', 'l', 'h','y','b','r','j','t'] Lettres les plus fréquentes et discriminantes.
+    - l_min = 200. Racine carré de 40 000.
+    - N = 40 000. Texte suffisamment grand partagé équitablement en 200 fragments de 200 caractères.
+    - n = ⌊N/l_min⌋ = 40 000/200 = 200
+## 2) Définition des instance d'apprentissage.
+Nous allons definir fonction "frequence(texte,list_of_car)" qui nous permettre de calculer la frequenche de chaque element de notre ensemble "d" dans les fragments du texte. 
+Pour chaque entrée, on calcule la fréquence de chaque caracte de notre ensemble "d". On a choisie donc d=['a', 'e', 'n', 'u', 'p', 'i', 's', 'w','o', 'l', 'h','y','b','r','j','t'] par defaut car c'est lui qui minismise nos risques le mieux parmis tous ceux q'on a essayer, nous le demontrerons egalement par la suite
+def frequence(texte,list_of_car=d):
+    """Création d'une fonction fréquence qui prend en argument un texte et une liste de caractere,
+    calcul la frequence de chaque caractere de la liste
+    et retourne les frequences calculées sous forme de liste"""
+    li=[]
+    for c in list_of_car:
+        li.append(texte.count(c)/len(texte))
+    return li
+- Exemple de la fréquence de quelques lettres du texte en francais : 
+frequence(texte_fr,["a","s","e","z"])
+- Création de 5 dataframes contenant les fréquences de chaque caractère sur les 200 fragments pour chacune des 5 langues.
+la fonction datafrag est une Fonction qui permet de constituer une liste de liste des frequences de caractere de chaque fragment d'un texte. elle nous permtra de pouvoir créer des dataframes pour chaque langue.
+def datafrag(url,list_of_car,l_min):
+    data=[]
+    for frag in les_fragment_du_texte(url,l_min):
+        data.append(frequence(frag,list_of_car))
+    return data
+La fonction que nous allons definir maintenant intitulée "Instances(url,list_of_car=d,l_min,classe)" nous permetra de construire un dataframe. Ce dataframe va etre composé en ligne par la frequence des elements de de l'ensemnbe "d" des diferements frangemnt d'un texte et  en colone par les elemnts de l'ensemble "d" et la classe du fragment.
+def instances(url,list_of_car,l_min,classe):
+    frag=datafrag(url,list_of_car,l_min)
+    data=pd.DataFrame(frag,columns=list_of_car)
+    data["Classe"]=classe
+    return data
+- Dataframme contenant les fréquences de chaque caractère des 200 fragments en Francais :
+data_fr=instances(url[0],d,l_min,classe[0])
+data_fr
+- Dataframme contenant les fréquences de chaque caractère des 202 fragments en Anglais :
+data_en=instances(url[1],d,l_min,classe[1])
+data_en
+- Dataframme contenant les fréquences de chaque caractère des 202 fragments en Allemand :
+data_de=instances(url[2],d,l_min,classe[2])
+data_de
+- Dataframme contenant les fréquences de chaque caractère des 202 fragments en Italien :
+data_it=instances(url[3],d,l_min,classe[3])
+data_it
+- Dataframme contenant les fréquences de chaque caractère des 202 fragments en Espagnol :
+data_es=instances(url[4],d,l_min,classe[4])
+data_es
+- Création d'un dataframme comprenant les 5 dataframmes vu précedemment avec leur classe (concaténation).
+La fonction data_instances(l) ci-dessous va nous permetre de concatener les dataframe des differentes langues construit a partir de la fonction "Instances" precedent. Elle permet donc de constituer notre ensemble d'entraînement (instances d'apprentissage) pour l'algo de knn.
+def data_instances(l):
+    data=pd.concat(l, axis=0)
+    data=data.sort_values(by=['Classe'],ascending=False)
+    return data
+data=data_instances([data_fr,data_en,data_de,data_it,data_es])
+data
+- Ce dataframme a permit de répondre à notre seconde question et de donner la fréquence de chaque caractère ainsi que leur classe.
+## 3) Erreur empirique et en généralisation.
+- Le module d’apprentissage scikit-learn propose une implémentation de l’algorithme des k plus proches voisins.
+- Évaluation :
+
+    - scikit-learn dispose de nombreuses métriques d’évaluation.
+
+    - Començons donc par partager notre échantillon :
+ur="https://fr.wikipedia.org/wiki/Niger"
+ur1=url[0]
+datafr=instances(ur1,d,l_min,classe[0])
+p=datafr[:1]
+p=p[d]
+p
+X_train, X_test, y_train, y_test = train_test_split(data[d],data["Classe"],test_size=0.4,random_state=9)
+- Les paramètres de la fonction train_test_split sont :
+
+    - les données : variables prédictives ici data[d] (les fragments de texte)
+    - les données : variable à prédire ici data["Classe"] (les langues)
+    - test_size : proportion de l’échantillon consacré au test
+    - random_state : graine du générateur aléatoire utilisé pour le découpage
+len(X_train),len(y_train)
+X=data[d]
+Y=data["Classe"]
+X
+Y
+y=X[900:901] 
+y
+ knn = KNeighborsClassifier(n_neighbors=18)
+knn.fit(X, Y)
+knn.predict(y)
+Nous avons maintenant definir la fonction Erreur qui nous permetra de calculer l'erreur empirique et en generalisation pour un k donné. Plus k est faible plus on aura une meilleur precision pour la prediction d'ou l'importance de cette fonction 
+def erreur(list_of_car,l_min,k):
+    l=[instances(url[0],d,l_min,classe[0]),
+       instances(url[1],d,l_min,classe[1]),
+       instances(url[2],d,l_min,classe[2]),
+       instances(url[3],d,l_min,classe[3]),
+       instances(url[4],d,l_min,classe[4])]
+    data=data_instances(l)[list_of_car ]
+    cible=data_instances(l)["Classe"]
+    X_train, X_test, y_train, y_test = train_test_split(data,cible,test_size=0.4,random_state=11)
+    
+    knn = KNeighborsClassifier(n_neighbors=k)
+    knn.fit(X_train, y_train)
+    
+    #Calcul de l'erreur empirique
+    yhat_train = knn.predict(X_train) # predition de la langue  
+    err_emp = zero_one_loss(yhat_train, y_train) # calcul combien de fois on se trompe dans notre prédiction
+
+    #Calcul  l'erreur en generalisation
+    yhat_val = knn.predict(X_test)
+    err_gen = zero_one_loss(yhat_val, y_test)
+
+    print("Erreur empirique:", err_emp, 
+          "\nErreur en généralisation:", err_gen)
+La fonction Entrainement a le même fonctionnement que la fonction precedent sa seule particularité, il propose plusieurs k. Il nous permet d'avoir une liste des k pour en fin choisir celui qui minimise les risques d'erreur (empirique et en generalisation).
+def Entrainement(l,n,list_of_car):
+    
+    data=data_instances(l)[list_of_car ]
+    cible=data_instances(l)["Classe"]
+    X_train, X_test, y_train, y_test = train_test_split(data,cible,test_size=0.4,random_state=11)
+    erreurs = []
+    for k in range(1,n):
+        # L'entraînement du modèle
+        knn = KNeighborsClassifier(n_neighbors=k)
+        knn.fit(X_train, y_train) #entrainemnet du monele
+        # l'erreur empirique
+        yhat_train = knn.predict(X_train) # prediction de la langue 
+        err_emp = zero_one_loss(yhat_train, y_train) # calcul combien de fois on se trompe dans notre prédiction
+        # l'erreur en generalisation
+        yhat_val = knn.predict(X_test)
+        err_gen = zero_one_loss(yhat_val, y_test)
+        erreurs.append([k, err_emp, err_gen])
+        dfErreurs = pd.DataFrame(erreurs, 
+                                 columns=["k", "empirique", "generalization"])
+    return dfErreurs
+La Fonction f est un complement de la fonction "Entrainement". Elle fait la meme chose que cette derniere, elle nous permet tout simplement d'eviter de duppliquer cette fonction a chaque fois qu'on change de parametre.
+def f(d,l_min,n):
+    l=[instances(url[0],d,l_min,classe[0]),
+       instances(url[1],d,l_min,classe[1]),
+       instances(url[2],d,l_min,classe[2]),
+       instances(url[3],d,l_min,classe[3]),
+       instances(url[4],d,l_min,classe[4])]
+    dataEr=Entrainement(l,n,d)
+    return dataEr
+f(d,l_min,20)
+On trace les courbes des erreurs empirique et en generalisation pour visualiser leurs allure et choisir le plus petit k 
+dfErreurs=f(d,l_min,20)
+dfErreurs.plot(x="k",grid=True)
+- Un classifier 𝑘-plus proches voisins avec 𝑘=19 semble donner le meilleur résultat en terme de généralisation.
+erreur(d,l_min,19)
+- On chosi donc le k qui minimise l'erreur.
+- En prenant le k=19 on observe un erreur moins importante pour l_min = 200
+# Appronfondissement.
+# 1 er cas étudié: prenons les memes instances mais avec des d et des l_min différents :
+Maintenant gardons les memes instances, le meme d, mais prenons l_min=150
+dfErreurs=f(d,150,20)
+dfErreurs.plot(x="k",grid=True)
+- Un classifier 𝑘-plus proches voisins avec 𝑘=12 semble donner le meilleur résultat en terme de généralisation.
+- On observe qu'ici les k sont différents lorsque l_min change.
+erreur(d,150,12)
+erreur(d,l_min,19)
+ - le minimum des k pour l_min=150 est plus elevé que quand l_min=200
+Gardons les memes instances, le meme d, mais prenons l_min=250
+dfErreurs=f(d,250,15)
+dfErreurs.plot(x="k",grid=True)
+- Un classifier 𝑘-plus proches voisins avec 𝑘=3 semble donner le meilleur résultat en terme de généralisation
+erreur(d,250,3)
+erreur(d,l_min,19)
+- Pour l_min=250 on se trompe moins par raport l_min=200
+- On observe donc que selon le l_min l'erreur est plus ou moins importante.
+Maintenant changeons simplement d et gardons notre l_min de base.
+d2=['p','i','t','s']
+dfErreurs=f(d2,l_min,20)
+dfErreurs.plot(x="k",grid=True)
+- Un classifier 𝑘-plus proches voisins avec 𝑘=18 semble donner le meilleur résultat en terme de généralisation.
+erreur(d2,l_min,18)
+erreur(d,l_min,19)
+- On observe une erreur plus importante pour ce d choisi. 
+- Conclusion 1 :
+    - Avec les 5 instances on observe que l'erreur devient plus ou moins importante lorsque d ou l_min change.
+# 2 ème cas: On compare les erreurs entre 2 langues proches et 2 langues différentes :
+Maintenant changeons les instances (uniquement espagnol et italien, langues qui se rapprochent) en gardant le meme l_min et le meme d :
+def erreur2(list_of_car,l_min,k):
+    l=[instances(url[3],d,l_min,classe[3]),
+       instances(url[4],d,l_min,classe[4])]
+    data=data_instances(l)[list_of_car ]
+    cible=data_instances(l)["Classe"]
+    X_train, X_test, y_train, y_test = train_test_split(data,cible,test_size=0.4,random_state=11)
+    
+    knn = KNeighborsClassifier(n_neighbors=k)
+    knn.fit(X_train, y_train)
+    
+    #Calcul de l'erreur empirique
+    yhat_train = knn.predict(X_train) # predition de la langue  
+    err_emp = zero_one_loss(yhat_train, y_train) # calcul combien de fois on se trompe dans notre prédiction
+
+    #Calcul  l'erreur en generalisation
+    yhat_val = knn.predict(X_test)
+    err_gen = zero_one_loss(yhat_val, y_test)
+
+    print("Erreur empirique:", err_emp, 
+          "\nErreur en généralisation:", err_gen)
+def f_es_it(d,l_min,n):
+    l=[instances(url[3],d,l_min,classe[3]),
+       instances(url[4],d,l_min,classe[4])]
+    dataEr=Entrainement(l,n,d)
+    return dataEr
+dfErreurs=f_es_it(d,l_min,20)
+dfErreurs.plot(x="k",grid=True)
+- Un classifier 𝑘-plus proches voisins avec 𝑘=9 semble donner le meilleur résultat en terme de généralisation.
+erreur2(d,l_min,9)
+erreur(d,l_min,19)
+- On constate que pour le cas ou il y a tout les instances l'erreur empirique est moins importante.
+Maintenant prenons uniquement francais et allemand ( langue différente ) et comparons avec notre exemple précédent.
+def erreur3(list_of_car,l_min,k):
+    l=[instances(url[0],d,l_min,classe[0]),
+       instances(url[2],d,l_min,classe[2])]
+    data=data_instances(l)[list_of_car ]
+    cible=data_instances(l)["Classe"]
+    X_train, X_test, y_train, y_test = train_test_split(data,cible,test_size=0.4,random_state=11)
+    
+    knn = KNeighborsClassifier(n_neighbors=k)
+    knn.fit(X_train, y_train)
+    
+    #Calcul de l'erreur empirique
+    yhat_train = knn.predict(X_train) # predition de la langue  
+    err_emp = zero_one_loss(yhat_train, y_train) # calcul combien de fois on se trompe dans notre prédiction
+
+    #Calcul  l'erreur en generalisation
+    yhat_val = knn.predict(X_test)
+    err_gen = zero_one_loss(yhat_val, y_test)
+
+    print("Erreur empirique:", err_emp, 
+          "\nErreur en généralisation:", err_gen)
+def f_fr_de(d,l_min,n):
+    l=[instances(url[0],d,l_min,classe[0]),
+       instances(url[2],d,l_min,classe[2])]
+    dataEr=Entrainement(l,n,d)
+    return dataEr
+dfErreurs=f_fr_de(d,l_min,20)
+dfErreurs.plot(x="k",grid=True)
+- Un classifier 𝑘-plus proches voisins avec 𝑘=11 semble donner le meilleur résultat en terme de généralisation.
+- Conclusion :
+    - Lorsque les langues se rapprochent il y a plus d'erreur, en effet cela s'explique par le fait qu'il est difficile de les reconnaitres en sachant qu'elles ont des similitudes.
+## Conclusion:
+- Il faut donc choisir le l_min, le d, et les instances qui minise les risques; en effet certains cas comme on a pu étudié, comme par exemple en modifiant le domaine instances on remarque des risques d'erreurs plus ou moins  importants.
+-les langues les plus proches semble donnée des risques d'erreurs k plus elevés que celles qui ne le sont pas, la prediction pour ces langues est donc moins precises.
+
+- Parmis tous les cas qu'on a pu etudier, le cas où l_min=250 avec d=['a', 'e', 'n', 'u', 'p', 'i', 's', 'w','o', 'l', 'h','y','b','r','j','t']  et n=160 semble donne un meilleurs resultat (le risque d'erreur est beaucoup plus faible)
